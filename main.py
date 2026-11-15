@@ -6,12 +6,28 @@ import asyncio
 import io
 import sqlite3
 import random
+import base64
 from uuid import uuid4
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InlineQueryResultPhoto, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, InlineQueryHandler
 from telegram.error import RetryAfter
 import httpx
+
+# --- НОВОЕ: Мини-веб-сервер для Render ---
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Bot is running!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+# ----------------------------------------
 
 # Загружаем ключи
 load_dotenv()
@@ -37,7 +53,7 @@ def init_db():
     conn.close()
 
 def save_message_to_db(user_id: int, role: str, content: str):
-    content = content[:500] # Обрезаем сообщение
+    content = content[:500]
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO history (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
@@ -62,7 +78,7 @@ def clear_history_in_db(user_id: int):
 # --- ПАМЯТЬ И АНТИФЛУД ---
 user_last_message_time = {}
 user_message_timestamps = {} 
-user_awaiting_prompt = {} # <-- НОВОЕ: Кто ждет ввода картинки
+user_awaiting_prompt = {} 
 FLOOD_LIMIT = 2.0 
 MESSAGE_LIMIT = 10 
 
@@ -93,7 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     clear_history_in_db(user_id)
     user_message_timestamps[user_id] = []
-    user_awaiting_prompt[user_id] = False # Сбрасываем режим
+    user_awaiting_prompt[user_id] = False
     
     keyboard = await get_keyboard()
     inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("ℹ️ О боте", callback_data="about_bot")]])
@@ -352,7 +368,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = original_text.lower().strip()
     current_time = time.time()
     
-    # Антифлуд
     if user_id in user_last_message_time:
         if current_time - user_last_message_time[user_id] < FLOOD_LIMIT:
             await update.message.reply_text("⚠️ Не так быстро, путник.")
@@ -369,10 +384,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message_timestamps[user_id].append(current_time)
     user_last_message_time[user_id] = current_time
     
-    # --- ОБРАБОТКА РЕЖИМА ОЖИДАНИЯ КАРТИНКИ ---
     if user_awaiting_prompt.get(user_id, False):
-        # Если пользователь ждет ввода картинки, это сообщение — промпт
-        user_awaiting_prompt[user_id] = False # Сбрасываем режим
+        user_awaiting_prompt[user_id] = False
         prompt = user_text
         await update.message.reply_text("🎨 Сейчас нарисую...")
         try:
@@ -384,9 +397,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"❌ Не удалось нарисовать: {e}")
         return
-    # ------------------------------------------
     
-    # Обработка кнопок
     if user_text == "старт 🚀":
         await start(update, context)
         return
@@ -430,7 +441,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     if user_text == "нарисуй 🎨":
-        user_awaiting_prompt[user_id] = True # Включаем режим ожидания
+        user_awaiting_prompt[user_id] = True
         await update.message.reply_text("🎨 Опиши, что ты хочешь увидеть (просто напиши, что нарисовать).")
         return
         
@@ -452,7 +463,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(rates, parse_mode="Markdown")
         return
     
-    # Перевод
     if "переведи" in user_text or "перевод" in user_text:
         target_lang = "ru"
         if "англ" in user_text: target_lang = "en"
@@ -478,7 +488,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Ошибка перевода: {e}")
             return
     
-    # Погода
     if user_text.startswith("погода"):
         city = user_text[6:].strip()
         if not city:
@@ -503,7 +512,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(weather_report)
             return
     
-    # Картинки по слову "нарисуй"
     if "нарисуй" in user_text:
         prompt = user_text.replace("нарисуй", "").strip()
         if not prompt:
@@ -521,7 +529,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Не удалось нарисовать: {e}")
         return
     
-    # ИИ
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         ai_response = await ask_ai(user_id, user_text)
@@ -549,6 +556,10 @@ def main():
         return
     
     init_db()
+    
+    # Запускаем мини-веб-сервер в отдельном потоке, чтобы Render видел "сайт"
+    threading.Thread(target=run_web_server, daemon=True).start()
+    print("✅ Веб-сервер для Render запущен в фоне.")
     
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     

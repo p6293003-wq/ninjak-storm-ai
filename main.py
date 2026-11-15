@@ -7,27 +7,27 @@ import io
 import sqlite3
 import random
 import base64
+import threading
 from uuid import uuid4
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InlineQueryResultPhoto, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, InlineQueryHandler
 from telegram.error import RetryAfter
 import httpx
 
-# --- НОВОЕ: Мини-веб-сервер для Render ---
-from flask import Flask
-import threading
+# --- ЗАГЛУШКА ДЛЯ RENDER (чтобы не ругался на порт) ---
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
 
-app = Flask(__name__)
-
-@app.route('/')
-def health_check():
-    return "Bot is running!"
-
-def run_web_server():
+def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-# ----------------------------------------
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    server.serve_forever()
+# -----------------------------------------------------
 
 # Загружаем ключи
 load_dotenv()
@@ -557,9 +557,9 @@ def main():
     
     init_db()
     
-    # Запускаем мини-веб-сервер в отдельном потоке, чтобы Render видел "сайт"
-    threading.Thread(target=run_web_server, daemon=True).start()
-    print("✅ Веб-сервер для Render запущен в фоне.")
+    # Запускаем заглушку для порта
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    print("✅ Заглушка для Render запущена.")
     
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     

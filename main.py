@@ -16,7 +16,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.error import RetryAfter
 import httpx
 
-# --- ЗАГЛУШКА ДЛЯ RENDER (чтобы не ругался на порт) ---
+# --- ЗАГЛУШКА ДЛЯ RENDER ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -145,7 +145,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if query.data == "about_bot":
         await query.message.reply_text(
-            "🧠 **NINJAK STORM AI**\nВерсия: 6.3 (Умный художник)\nСоздан на Python.",
+            "🧠 **NINJAK STORM AI**\nВерсия: 6.4 (Исправленный художник)\nСоздан на Python.",
             parse_mode="Markdown"
         )
 
@@ -361,7 +361,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.inline_query.answer(results)
 
-# --- ОБРАБОТЧИК СООБЩЕНИЙ ---
+# --- ОБРАБОТЧИК СООБЩЕНИЙ (ИСПРАВЛЕННЫЙ) ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     original_text = update.message.text
@@ -384,11 +384,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message_timestamps[user_id].append(current_time)
     user_last_message_time[user_id] = current_time
     
+    # --- ИСПРАВЛЕННАЯ ЛОГИКА РИСОВАНИЯ ---
+    # Если пользователь в режиме ожидания промпта
     if user_awaiting_prompt.get(user_id, False):
-        user_awaiting_prompt[user_id] = False
+        # НЕ СБРАСЫВАЕМ ФЛАГ СРАЗУ, а обрабатываем
         prompt = user_text
-        await update.message.reply_text("🎨 Сейчас нарисую...")
         try:
+            await update.message.reply_text("🎨 Сейчас нарисую...")
             image_bytes = await generate_image(prompt)
             if len(image_bytes) > 10 * 1024 * 1024:
                 await update.message.reply_document(document=io.BytesIO(image_bytes), filename="image.png", caption="Картинка получилась слишком большой, отправляю файлом.")
@@ -396,7 +398,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_photo(photo=image_bytes, caption=f"Вот что получилось: «{prompt}»")
         except Exception as e:
             await update.message.reply_text(f"❌ Не удалось нарисовать: {e}")
+        finally:
+            # Сбрасываем флаг ТОЛЬКО ПОСЛЕ завершения (успешного или нет)
+            user_awaiting_prompt[user_id] = False
         return
+    # -------------------------------------
     
     if user_text == "старт 🚀":
         await start(update, context)
@@ -557,7 +563,6 @@ def main():
     
     init_db()
     
-    # Запускаем заглушку для порта
     threading.Thread(target=run_dummy_server, daemon=True).start()
     print("✅ Заглушка для Render запущена.")
     
@@ -572,7 +577,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("✅ Бот (Умный художник) запущен!")
+    print("✅ Бот (Исправленный художник) запущен!")
     app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
